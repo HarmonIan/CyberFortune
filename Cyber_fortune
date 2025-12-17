@@ -1,0 +1,231 @@
+import random
+from lunar_python import Lunar, Solar
+from pyecharts import options as opts
+from pyecharts.charts import Kline, Bar, Line, Grid
+from pyecharts.commons.utils import JsCode
+
+
+class CyberFateEngine:
+    def __init__(self, year, month, day, hour):
+        self.solar = Solar.fromYmdHms(year, month, day, hour, 0, 0)
+        self.lunar = self.solar.getLunar()
+        self.ba_zi = self.lunar.getBaZi()  # 返回 ['年柱', '月柱', '日柱', '时柱']
+
+        # 修正：从日柱(索引2)的第一个字获取日干
+        self.day_master = self.ba_zi[2][0]
+        self.five_elements = self._analyze_elements()
+
+        # 定义五行生克关系
+        self.relationships = {
+            "木": {"生": "火", "克": "土", "被生": "水", "被克": "金"},
+            "火": {"生": "土", "克": "金", "被生": "木", "被克": "水"},
+            "土": {"生": "金", "克": "水", "被生": "火", "被克": "木"},
+            "金": {"生": "水", "克": "木", "被生": "土", "被克": "火"},
+            "水": {"生": "木", "克": "火", "被生": "金", "被克": "土"},
+        }
+
+    def _get_wuxing(self, char):
+        """获取干或支的五行属性"""
+        wuxing_map = {
+            "甲": "木", "乙": "木", "丙": "火", "丁": "火", "戊": "土",
+            "己": "土", "庚": "金", "辛": "金", "壬": "水", "癸": "水",
+            "子": "水", "丑": "土", "寅": "木", "卯": "木", "辰": "土",
+            "巳": "火", "午": "火", "未": "土", "申": "金", "酉": "金",
+            "戌": "土", "亥": "水"
+        }
+        return wuxing_map.get(char, "土")
+
+    def _analyze_elements(self):
+        """简单分析八字五行强弱"""
+        dm_element = self._get_wuxing(self.day_master)
+        return {"dm": dm_element, "structure": "模拟格局"}
+
+    def calculate_life_kline(self, start_age=0, end_age=80):
+        """生成人生K线数据"""
+        data = []
+        dates = []
+        volumes = []
+
+        # 初始“股价”
+        current_price = 1000.0
+
+        dm_element = self.five_elements['dm']
+
+        print(f"【系统启动】正在解析命盘... 日主: {self.day_master}({dm_element})")
+        # 修正：打印八字
+        print(f"【八字】{self.ba_zi[0]} {self.ba_zi[1]} {self.ba_zi[2]} {self.ba_zi[3]}")
+
+        for age in range(start_age, end_age + 1):
+            year = self.solar.getYear() + age
+            # 获取流年干支
+            temp_lunar = Lunar.fromYmd(year, 6, 15)
+            year_gan = temp_lunar.getYearGan()
+            year_zhi = temp_lunar.getYearZhi()
+
+            year_element_gan = self._get_wuxing(year_gan)
+            year_element_zhi = self._get_wuxing(year_zhi)
+
+            # --- 核心算法：运势波动逻辑 ---
+            relation_gan = self._check_relation(dm_element, year_element_gan)
+            relation_zhi = self._check_relation(dm_element, year_element_zhi)
+
+            # 基础大运趋势 (每10年变一次)
+            major_luck_trend = 1 if (age // 10) % 2 == 0 else -1
+            if random.random() > 0.8: major_luck_trend *= -1
+
+            # 评分逻辑
+            trend_score = 0
+            if relation_gan == "生" or relation_gan == "同": trend_score += 1.2
+            if relation_zhi == "生" or relation_zhi == "同": trend_score += 1.2
+            if relation_gan == "克": trend_score -= 2.0  # 七杀攻身，压力大
+            if relation_zhi == "克": trend_score -= 1.5
+
+            # 综合计算涨跌幅
+            change_percent = (trend_score * 0.02) + (major_luck_trend * 0.04) + random.uniform(-0.06, 0.06)
+
+            open_price = current_price
+            close_price = current_price * (1 + change_percent)
+
+            # 震幅
+            high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.04))
+            low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.04))
+
+            # 成交量
+            volume = int(random.uniform(100, 500))
+            if "克" in [relation_gan, relation_zhi] or "冲" in [relation_gan, relation_zhi]:
+                volume = int(volume * 1.8)  # 动荡年份，能量巨大
+
+            # 数据格式: [Open, Close, Low, High]
+            data.append([round(open_price, 2), round(close_price, 2), round(low_price, 2), round(high_price, 2)])
+            dates.append(f"{year}年({year_gan}{year_zhi})[{age}岁]")
+            volumes.append(volume)
+
+            current_price = close_price
+
+        return dates, data, volumes
+
+    def _check_relation(self, self_elm, target_elm):
+        if self.relationships[target_elm]["生"] == self_elm: return "生"
+        if self.relationships[target_elm]["克"] == self_elm: return "克"
+        if target_elm == self_elm: return "同"
+        return "他"
+
+
+def render_cyber_chart(dates, kline_data, volumes, user_info):
+    """使用Pyecharts渲染赛博风格K线图"""
+
+    def calculate_ma(day_count, data):
+        result = []
+        for i in range(len(data)):
+            if i < day_count:
+                result.append("-")
+                continue
+            sum_val = 0
+            for j in range(day_count):
+                sum_val += data[i - j][1]
+            result.append(round(sum_val / day_count, 2))
+        return result
+
+    ma5 = calculate_ma(5, kline_data)
+    ma10 = calculate_ma(10, kline_data)
+
+    kline = (
+        Kline(init_opts=opts.InitOpts(width="100%", height="800px", bg_color="#0e161d", page_title="赛博算命系统"))
+            .add_xaxis(dates)
+            .add_yaxis(
+            "运势",
+            kline_data,
+            itemstyle_opts=opts.ItemStyleOpts(
+                color="#ff3333",
+                color0="#00ff44",
+                border_color="#ff3333",
+                border_color0="#00ff44",
+            ),
+        )
+            .set_global_opts(
+            xaxis_opts=opts.AxisOpts(is_scale=True, axislabel_opts=opts.LabelOpts(color="#8899a6")),
+            yaxis_opts=opts.AxisOpts(
+                is_scale=True,
+                splitarea_opts=opts.SplitAreaOpts(is_show=True, areastyle_opts=opts.AreaStyleOpts(opacity=1)),
+                axislabel_opts=opts.LabelOpts(color="#8899a6")
+            ),
+            title_opts=opts.TitleOpts(
+                title=f"CYBER FATE K-LINE: {user_info}",
+                subtitle="High Frequency Destiny Trading System",
+                title_textstyle_opts=opts.TextStyleOpts(color="#00f2ff", font_size=24),
+                subtitle_textstyle_opts=opts.TextStyleOpts(color="#aaaaaa"),
+                pos_left="center"
+            ),
+            datazoom_opts=[
+                opts.DataZoomOpts(is_show=True, type_="inside", xaxis_index=[0, 1], range_start=0, range_end=100),
+                opts.DataZoomOpts(is_show=True, xaxis_index=[0, 1], pos_top="95%", range_start=0, range_end=100),
+            ],
+            legend_opts=opts.LegendOpts(pos_top="5%", textstyle_opts=opts.TextStyleOpts(color="#ffffff")),
+            tooltip_opts=opts.TooltipOpts(
+                trigger="axis",
+                axis_pointer_type="cross",
+                background_color="rgba(0, 0, 0, 0.8)",
+                border_color="#00f2ff",
+                textstyle_opts=opts.TextStyleOpts(color="#00f2ff")
+            ),
+        )
+    )
+
+    line = (
+        Line()
+            .add_xaxis(dates)
+            .add_yaxis("MA5 (小运)", ma5, is_smooth=True, is_symbol_show=False,
+                       linestyle_opts=opts.LineStyleOpts(opacity=0.8, width=1))
+            .add_yaxis("MA10 (大运)", ma10, is_smooth=True, is_symbol_show=False,
+                       linestyle_opts=opts.LineStyleOpts(opacity=0.8, width=2, color="#eeb422"))
+            .set_series_opts(label_opts=opts.LabelOpts(is_show=False))
+    )
+
+    bar = (
+        Bar()
+            .add_xaxis(dates)
+            .add_yaxis(
+            "能量(Qi)",
+            volumes,
+            xaxis_index=1,
+            yaxis_index=1,
+            label_opts=opts.LabelOpts(is_show=False),
+            itemstyle_opts=opts.ItemStyleOpts(color=JsCode("""
+                function(params) {
+                    return params.data > 300 ? '#ff0000' : '#14b143';
+                }
+            """))
+        )
+            .set_global_opts(
+            xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(is_show=False)),
+            legend_opts=opts.LegendOpts(is_show=False),
+        )
+    )
+
+    kline.overlap(line)
+
+    grid = Grid(init_opts=opts.InitOpts(width="100%", height="800px", theme="dark"))
+    grid.add(kline, grid_opts=opts.GridOpts(pos_left="5%", pos_right="5%", height="60%"))
+    grid.add(bar, grid_opts=opts.GridOpts(pos_left="5%", pos_right="5%", pos_top="75%", height="15%"))
+
+    output_file = "life_kline.html"
+    grid.render(output_file)
+    print(f"【生成完毕】请打开 {output_file} 查看您的人生K线。")
+
+
+if __name__ == "__main__":
+    print("-------------------------------------------------")
+    print("   CYBER FORTUNE TELLING SYSTEM v1.1 (FIXED)   ")
+    print("-------------------------------------------------")
+
+    # 修改这里的出生日期
+    input_year = 2000
+    input_month = 1
+    input_day = 1
+    input_hour = 8
+
+    engine = CyberFateEngine(input_year, input_month, input_day, input_hour)
+    dates, kline_data, volumes = engine.calculate_life_kline(0, 80)
+
+    user_info = f"UID: {input_year}{input_month:02d}{input_day:02d}-{input_hour:02d}00"
+    render_cyber_chart(dates, kline_data, volumes, user_info)
